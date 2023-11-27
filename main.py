@@ -6,19 +6,27 @@ from python_utils import converters
 import time
 import zoneinfo
 import tzlocal
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+import random
+from selenium import webdriver
 
 HLTV_COOKIE_TIMEZONE = "Europe/Copenhagen"
-HLTV_ZONEINFO=zoneinfo.ZoneInfo(HLTV_COOKIE_TIMEZONE)
+HLTV_ZONEINFO = zoneinfo.ZoneInfo(HLTV_COOKIE_TIMEZONE)
 LOCAL_TIMEZONE_NAME = tzlocal.get_localzone_name()
 LOCAL_ZONEINFO = zoneinfo.ZoneInfo(LOCAL_TIMEZONE_NAME)
 
 TEAM_MAP_FOR_RESULTS = []
+
+
 def _get_all_teams():
     if not TEAM_MAP_FOR_RESULTS:
         teams = get_parsed_page("https://www.hltv.org/stats/teams?minMapCount=0")
         for team in teams.find_all("td", {"class": ["teamCol-teams-overview"], }):
-            team = {'id': converters.to_int(team.find("a")["href"].split("/")[-2]), 'name': team.find("a").text, 'url': "https://hltv.org" + team.find("a")["href"]}
+            team = {'id': converters.to_int(team.find("a")["href"].split("/")[-2]), 'name': team.find("a").text,
+                    'url': "https://hltv.org" + team.find("a")["href"]}
             TEAM_MAP_FOR_RESULTS.append(team)
+
 
 def _findTeamId(teamName: str):
     _get_all_teams()
@@ -27,11 +35,13 @@ def _findTeamId(teamName: str):
             return team['id']
     return None
 
+
 def _padIfNeeded(numberStr: str):
     if int(numberStr) < 10:
         return str(numberStr).zfill(2)
     else:
         return str(numberStr)
+
 
 def _monthNameToNumber(monthName: str):
     # Check for the input "Augu" and convert it to "August"
@@ -41,8 +51,9 @@ def _monthNameToNumber(monthName: str):
         monthName = "August"
     return datetime.datetime.strptime(monthName, '%B').month
 
+
 def get_parsed_page(url, delay=0.5):
-    # This fixes a blocked by cloudflare error i've encountered
+    # This fixes a blocked by cloudflare error I've encountered
     headers = {
         "referer": "https://www.hltv.org/stats",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -56,11 +67,30 @@ def get_parsed_page(url, delay=0.5):
 
     return BeautifulSoup(requests.get(url, headers=headers, cookies=cookies).text, "lxml")
 
+
+def get_parsed_page_sel(url, delay=0.5):
+    # Настройка WebDriver (например, ChromeDriver)
+    driver = webdriver.Chrome()  # Укажите путь к ChromeDriver
+
+    # Открытие URL
+    driver.get(url)
+
+    # Ожидание для загрузки страницы и выполнения JavaScript (можно увеличить при необходимости)
+    time.sleep(delay)
+
+    # Получение HTML-контента после загрузки страницы
+    html_content = driver.page_source
+    driver.quit()
+
+    return BeautifulSoup(html_content, "lxml")
+
+
 def top5teams():
     home = get_parsed_page("https://hltv.org/")
     teams = []
     for team in home.find_all("div", {"class": ["col-box rank"], }):
-        team = {'id': _findTeamId(team.text[3:]), 'name': team.text[3:], 'url': "https://hltv.org" + team.find_all("a")[1]["href"]}
+        team = {'id': _findTeamId(team.text[3:]), 'name': team.text[3:],
+                'url': "https://hltv.org" + team.find_all("a")[1]["href"]}
         teams.append(team)
     return teams
 
@@ -73,15 +103,17 @@ def top30teams():
         newteam = {'name': team.find('div', {"class": "ranking-header"}).select('.name')[0].text.strip(),
                    'rank': converters.to_int(team.select('.position')[0].text.strip(), regexp=True),
                    'rank-points': converters.to_int(team.find('span', {'class': 'points'}).text, regexp=True),
-                   'team-id': _findTeamId(team.find('div', {"class": "ranking-header"}).select('.name')[0].text.strip()),
-                   'team-url': "https://hltv.org/team/" + team.find('a', {'class': 'details moreLink'})['href'].split('/')[-1] + "/" + team.find('div', {"class": "ranking-header"}).select('.name')[0].text.strip(),
+                   'team-id': _findTeamId(
+                       team.find('div', {"class": "ranking-header"}).select('.name')[0].text.strip()),
+                   'team-url': "https://hltv.org/team/" +
+                               team.find('a', {'class': 'details moreLink'})['href'].split('/')[-1] + "/" +
+                               team.find('div', {"class": "ranking-header"}).select('.name')[0].text.strip(),
                    'stats-url': "https://www.hltv.org" + team.find('a', {'class': 'details moreLink'})['href'],
                    'team-players': []}
         for player_div in team.find_all("td", {"class": "player-holder"}):
-            player = {}
-            player['name'] = player_div.find('img', {'class': 'playerPicture'})['title']
-            player['player-id'] = converters.to_int(player_div.select('.pointer')[0]['href'].split("/")[-2])
-            player['url'] = "https://www.hltv.org" + player_div.select('.pointer')[0]['href']
+            player = {'name': player_div.find('img', {'class': 'playerPicture'})['title'],
+                      'player-id': converters.to_int(player_div.select('.pointer')[0]['href'].split("/")[-2]),
+                      'url': "https://www.hltv.org" + player_div.select('.pointer')[0]['href']}
             newteam['team-players'].append(player)
         teamlist.append(newteam)
     return teamlist
@@ -89,19 +121,58 @@ def top30teams():
 
 def top_players():
     page = get_parsed_page("https://www.hltv.org/stats")
+    # print(str(page))
     players = page.find_all("div", {"class": "col"})[0]
     playersArray = []
     for player in players.find_all("div", {"class": "top-x-box standard-box"}):
-        playerObj = {}
-        playerObj['country'] = player.find_all('img')[1]['alt']
+        playerObj = {'country': player.find_all('img')[1]['alt']}
         buildName = player.find('img', {'class': 'img'})['alt'].split("'")
         playerObj['name'] = buildName[0].rstrip() + buildName[2]
         playerObj['nickname'] = player.find('a', {'class': 'name'}).text
         playerObj['rating'] = player.find('div', {'class': 'rating'}).find('span', {'class': 'bold'}).text
-        playerObj['maps-played'] = player.find('div', {'class': 'average gtSmartphone-only'}).find('span', {'class': 'bold'}).text
+        playerObj['maps-played'] = player.find('div', {'class': 'average gtSmartphone-only'}).find('span', {
+            'class': 'bold'}).text
         playerObj['url'] = "https://hltv.org" + player.find('a', {'class': 'name'}).get('href')
         playerObj['id'] = converters.to_int(player.find('a', {'class': 'name'}).get('href').split("/")[-2])
         playersArray.append(playerObj)
+    return playersArray
+
+
+def top_players_full(from_file: bool = True):
+    if from_file:
+        with open('Counter-Strike Player statistics database _ HLTV.org.html', 'r') as f:
+            text = f.read()
+        page = BeautifulSoup(text, "html.parser")
+    else:
+        page = get_parsed_page_sel("https://www.hltv.org/stats/players?startDate=2022-11-27&endDate=2023-11-27&minMapCount=20")
+    # print(str(page)[:120000])
+    playerCol = page.find_all("td", {"class": "playerCol"})
+    teamCol = page.find_all("td", {"class": "teamCol"})
+    statsDetailMapsAndKD = page.find_all("td", {"class": "statsDetail"})
+    statsDetailRounds = page.find_all("td", {"class": "statsDetail gtSmartphone-only"})
+    kdDiffCol = page.find_all("td", {"class": ["kdDiffCol won",
+                                               "kdDiffCol lost"]})
+    ratingCol = page.find_all("td", {"class": ["ratingCol ratingPositive",
+                                               "ratingCol ratingNeutral",
+                                               "ratingCol ratingNegative"]})
+
+    playersArray = []
+    for i in range(len(playerCol)):
+        player = playerCol[i]
+
+        #try:
+        playerObj = {'country': player.find_all('img')[0]['alt']}
+        #buildName = player.find('img', {'class': 'img'})['alt'].split("'")
+        #playerObj['name'] = player.find('a').text
+        playerObj['nickname'] = player.find('a').text.strip()
+        #playerObj['rating'] = player.find('div', {'class': 'rating'}).find('span', {'class': 'bold'}).text
+        #playerObj['maps-played'] = player.find('div', {'class': 'average gtSmartphone-only'}).find('span', {
+        #    'class': 'bold'}).text
+        playerObj['url'] = player.find('a')['href']
+        playerObj['id'] = playerObj['url'].split('/')[-2]
+        playersArray.append(playerObj)
+        #except Exception as e:
+        #    print(e)
     return playersArray
 
 
@@ -119,6 +190,7 @@ def get_players(teamid):
 
     return players
 
+
 def get_team_info(teamid):
     """
     :param teamid: integer (or string consisting of integers)
@@ -128,10 +200,8 @@ def get_team_info(teamid):
     """
     page = get_parsed_page("https://www.hltv.org/?pageid=179&teamid=" + str(teamid))
 
-    team_info = {}
-    team_info['team-name'] = page.find("div", {"class": "context-item"}).text
-    
-    team_info['team-id'] = _findTeamId(page.find("div", {"class": "context-item"}).text)
+    team_info = {'team-name': page.find("div", {"class": "context-item"}).text,
+                 'team-id': _findTeamId(page.find("div", {"class": "context-item"}).text)}
 
     match_page = get_parsed_page("https://www.hltv.org/team/" + str(teamid) +
                                  "/" + str(team_info['team-name']) + "#tab-matchesBox")
@@ -167,6 +237,7 @@ def get_team_info(teamid):
 
     return team_info
 
+
 def _get_current_lineup(player_anchors):
     """
     helper function for function above
@@ -176,14 +247,21 @@ def _get_current_lineup(player_anchors):
     for player_anchor in player_anchors[0:5]:
         player = {}
         buildName = player_anchor.find("img", {"class": "container-width"})["alt"].split('\'')
-        player['country'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
+        player['country'] = \
+        player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
         player['name'] = buildName[0].rstrip() + buildName[2]
-        player['nickname'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("div", {"class": "text-ellipsis"}).text
-        player['maps-played'] = int(re.search(r'\d+', player_anchor.find("div", {"class": "teammate-info standard-box"}).find("span").text).group())
-        player['url'] = "https://hltv.org" + player_anchor.find("div", {"class": "teammate-info standard-box"}).find("a").get("href")
-        player['id'] = converters.to_int(player_anchor.find("div", {"class": "teammate-info standard-box"}).find("a").get("href").split("/")[-2])
+        player['nickname'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("div", {
+            "class": "text-ellipsis"}).text
+        player['maps-played'] = int(re.search(r'\d+',
+                                              player_anchor.find("div", {"class": "teammate-info standard-box"}).find(
+                                                  "span").text).group())
+        player['url'] = "https://hltv.org" + player_anchor.find("div", {"class": "teammate-info standard-box"}).find(
+            "a").get("href")
+        player['id'] = converters.to_int(
+            player_anchor.find("div", {"class": "teammate-info standard-box"}).find("a").get("href").split("/")[-2])
         players.append(player)
     return players
+
 
 def _get_historical_lineup(player_anchors):
     """
@@ -194,25 +272,35 @@ def _get_historical_lineup(player_anchors):
     for player_anchor in player_anchors[5::]:
         player = {}
         buildName = player_anchor.find("img", {"class": "container-width"})["alt"].split('\'')
-        player['country'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
+        player['country'] = \
+        player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
         player['name'] = buildName[0].rstrip() + buildName[2]
-        player['nickname'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("div", {"class": "text-ellipsis"}).text
-        player['maps-played'] = int(re.search(r'\d+', player_anchor.find("div", {"class": "teammate-info standard-box"}).find("span").text).group())
-        player['url'] = "https://hltv.org" + player_anchor.find("div", {"class": "teammate-info standard-box"}).find("a").get("href")
-        player['id'] = converters.to_int(player_anchor.find("div", {"class": "teammate-info standard-box"}).find("a").get("href").split("/")[-2])
+        player['nickname'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("div", {
+            "class": "text-ellipsis"}).text
+        player['maps-played'] = int(re.search(r'\d+',
+                                              player_anchor.find("div", {"class": "teammate-info standard-box"}).find(
+                                                  "span").text).group())
+        player['url'] = "https://hltv.org" + player_anchor.find("div", {"class": "teammate-info standard-box"}).find(
+            "a").get("href")
+        player['id'] = converters.to_int(
+            player_anchor.find("div", {"class": "teammate-info standard-box"}).find("a").get("href").split("/")[-2])
         players.append(player)
     return players
+
 
 def _generate_countdown(date: str, time: str):
     timenow = datetime.datetime.now().astimezone(LOCAL_ZONEINFO).strftime('%Y-%m-%d %H:%M')
     deadline = date + " " + time
-    currentTime = datetime.datetime.strptime(timenow,'%Y-%m-%d %H:%M')
+    currentTime = datetime.datetime.strptime(timenow, '%Y-%m-%d %H:%M')
     ends = datetime.datetime.strptime(deadline, '%Y-%m-%d %H:%M')
     if currentTime < ends:
         return str(ends - currentTime)
     return None
 
+
 MATCH_WITH_COUNTDOWN = None
+
+
 def get_matches():
     global MATCH_WITH_COUNTDOWN
     matches = get_parsed_page("https://www.hltv.org/matches/")
@@ -227,10 +315,13 @@ def get_matches():
             matchObj = {}
 
             matchObj['url'] = "https://hltv.org" + getMatch.find("a", {"class": "match a-reset"}).get("href")
-            matchObj['match-id'] = converters.to_int(getMatch.find("a", {"class": "match a-reset"}).get("href").split("/")[-2])
+            matchObj['match-id'] = converters.to_int(
+                getMatch.find("a", {"class": "match a-reset"}).get("href").split("/")[-2])
 
             if (date and getMatch.find("div", {"class": "matchTime"})):
-                timeFromHLTV = datetime.datetime.strptime(date + " " + getMatch.find("div", {"class": "matchTime"}).text,'%Y-%m-%d %H:%M').replace(tzinfo=HLTV_ZONEINFO)
+                timeFromHLTV = datetime.datetime.strptime(
+                    date + " " + getMatch.find("div", {"class": "matchTime"}).text, '%Y-%m-%d %H:%M').replace(
+                    tzinfo=HLTV_ZONEINFO)
                 timeFromHLTV = timeFromHLTV.astimezone(LOCAL_ZONEINFO)
                 matchObj['date'] = timeFromHLTV.strftime('%Y-%m-%d')
                 matchObj['time'] = timeFromHLTV.strftime('%H:%M')
@@ -238,7 +329,8 @@ def get_matches():
                 matchObj['countdown'] = _generate_countdown(date, getMatch.find("div", {"class": "matchTime"}).text)
 
                 if not MATCH_WITH_COUNTDOWN and matchObj['countdown']:
-                    MATCH_WITH_COUNTDOWN = converters.to_int(getMatch.find("a", {"class": "match a-reset"}).get("href").split("/")[-2])
+                    MATCH_WITH_COUNTDOWN = converters.to_int(
+                        getMatch.find("a", {"class": "match a-reset"}).get("href").split("/")[-2])
 
             if getMatch.find("div", {"class": "matchEvent"}):
                 matchObj['event'] = getMatch.find("div", {"class": "matchEvent"}).text.strip()
@@ -247,9 +339,11 @@ def get_matches():
 
             if (getMatch.find_all("div", {"class": "matchTeams"})):
                 matchObj['team1'] = getMatch.find_all("div", {"class": "matchTeam"})[0].text.lstrip().rstrip()
-                matchObj['team1-id'] = _findTeamId(getMatch.find_all("div", {"class": "matchTeam"})[0].text.lstrip().rstrip())
+                matchObj['team1-id'] = _findTeamId(
+                    getMatch.find_all("div", {"class": "matchTeam"})[0].text.lstrip().rstrip())
                 matchObj['team2'] = getMatch.find_all("div", {"class": "matchTeam"})[1].text.lstrip().rstrip()
-                matchObj['team2-id'] = _findTeamId(getMatch.find_all("div", {"class": "matchTeam"})[1].text.lstrip().rstrip())
+                matchObj['team2-id'] = _findTeamId(
+                    getMatch.find_all("div", {"class": "matchTeam"})[1].text.lstrip().rstrip())
             else:
                 matchObj['team1'] = None
                 matchObj['team1-id'] = None
@@ -259,6 +353,7 @@ def get_matches():
             matches_list.append(matchObj)
 
     return matches_list
+
 
 def get_results():
     results = get_parsed_page("https://www.hltv.org/results/")
@@ -274,16 +369,21 @@ def get_results():
             resultObj = {}
 
             resultObj['url'] = "https://hltv.org" + res.find("a", {"class": "a-reset"}).get("href")
-            
+
             resultObj['match-id'] = converters.to_int(res.find("a", {"class": "a-reset"}).get("href").split("/")[-2])
 
             if (res.parent.find("span", {"class": "standard-headline"})):
-                dateText = res.parent.find("span", {"class": "standard-headline"}).text.replace("Results for ", "").replace("th", "").replace("rd","").replace("st","").replace("nd","")
+                dateText = res.parent.find("span", {"class": "standard-headline"}).text.replace("Results for ",
+                                                                                                "").replace("th",
+                                                                                                            "").replace(
+                    "rd", "").replace("st", "").replace("nd", "")
 
                 dateArr = dateText.split()
-                
-                dateTextFromArrPadded = _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(_monthNameToNumber(dateArr[0])) + "-" + _padIfNeeded(dateArr[1])
-                dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded,'%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
+
+                dateTextFromArrPadded = _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(
+                    _monthNameToNumber(dateArr[0])) + "-" + _padIfNeeded(dateArr[1])
+                dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded, '%Y-%m-%d').replace(
+                    tzinfo=HLTV_ZONEINFO)
                 dateFromHLTV = dateFromHLTV.astimezone(LOCAL_ZONEINFO)
 
                 resultObj['date'] = dateFromHLTV.strftime('%Y-%m-%d')
@@ -300,11 +400,15 @@ def get_results():
 
             if (res.find_all("td", {"class": "team-cell"})):
                 resultObj['team1'] = res.find_all("td", {"class": "team-cell"})[0].text.lstrip().rstrip()
-                resultObj['team1score'] = converters.to_int(res.find("td", {"class": "result-score"}).find_all("span")[0].text.lstrip().rstrip())
-                resultObj['team1-id'] = _findTeamId(res.find_all("td", {"class": "team-cell"})[0].text.lstrip().rstrip())
+                resultObj['team1score'] = converters.to_int(
+                    res.find("td", {"class": "result-score"}).find_all("span")[0].text.lstrip().rstrip())
+                resultObj['team1-id'] = _findTeamId(
+                    res.find_all("td", {"class": "team-cell"})[0].text.lstrip().rstrip())
                 resultObj['team2'] = res.find_all("td", {"class": "team-cell"})[1].text.lstrip().rstrip()
-                resultObj['team2-id'] = _findTeamId(res.find_all("td", {"class": "team-cell"})[1].text.lstrip().rstrip())
-                resultObj['team2score'] = converters.to_int(res.find("td", {"class": "result-score"}).find_all("span")[1].text.lstrip().rstrip())
+                resultObj['team2-id'] = _findTeamId(
+                    res.find_all("td", {"class": "team-cell"})[1].text.lstrip().rstrip())
+                resultObj['team2score'] = converters.to_int(
+                    res.find("td", {"class": "result-score"}).find_all("span")[1].text.lstrip().rstrip())
             else:
                 resultObj['team1'] = None
                 resultObj['team1-id'] = None
@@ -316,6 +420,7 @@ def get_results():
             results_list.append(resultObj)
 
     return results_list
+
 
 def _get_matches_by_team(table):
     events = table.find_all("tr", {"class": "event-header-cell"})
@@ -331,9 +436,10 @@ def _get_matches_by_team(table):
             dateArr = (row.find(
                 "td", {"class": "date-cell"}).find("span").text).split('/')
 
-            dateTextFromArrPadded = _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(dateArr[1]) + "-" + _padIfNeeded(dateArr[0])
+            dateTextFromArrPadded = _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(dateArr[1]) + "-" + _padIfNeeded(
+                dateArr[0])
 
-            dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded,'%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
+            dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded, '%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
             dateFromHLTV = dateFromHLTV.astimezone(LOCAL_ZONEINFO)
 
             date = dateFromHLTV.strftime('%Y-%m-%d')
@@ -341,25 +447,27 @@ def _get_matches_by_team(table):
             match['teams'] = {}
 
             if (row.find(
-                "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-1"})):
+                    "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-1"})):
                 match['teams']["team_1"] = row.find(
                     "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-1"}).text
-                match['teams']["team_1_id"] = _findTeamId(row.find( "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-1"}).text)
+                match['teams']["team_1_id"] = _findTeamId(
+                    row.find("td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-1"}).text)
             else:
                 match['teams']["team_1"] = None
                 match['teams']["team_1_id"] = None
 
             if (row.find(
-                "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-2"})):
+                    "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-2"})):
                 match['teams']["team_2"] = row.find(
                     "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-2"}).text
-                match['teams']["team_2_id"] = _findTeamId(row.find( "td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-2"}).text)
+                match['teams']["team_2_id"] = _findTeamId(
+                    row.find("td", {"class": "team-center-cell"}).find("a", {"class": "team-name team-2"}).text)
             else:
                 match['teams']["team_2"] = None
                 match['teams']["team_2_id"] = None
 
             match["confront_name"] = match['teams']["team_1"] or "TBD" + \
-                " X " + match['teams']["team_2"] or "TBD"
+                                     " X " + match['teams']["team_2"] or "TBD"
             match["championship"] = event_name
             match_url = row.find(
                 "td", {"class": "matchpage-button-cell"}).find("a")['href']
@@ -378,7 +486,8 @@ def get_results_by_date(start_date, end_date):
     offset = 0
     # Loop through all stats pages
     while True:
-        url = "https://www.hltv.org/stats/matches?startDate="+start_date+"&endDate="+end_date+"&offset="+str(offset)
+        url = "https://www.hltv.org/stats/matches?startDate=" + start_date + "&endDate=" + end_date + "&offset=" + str(
+            offset)
 
         results = get_parsed_page(url)
 
@@ -405,14 +514,16 @@ def get_results_by_date(start_date, end_date):
             dateArr = dateText.split("/")
             # TODO: yes, this shouldn't be hardcoded, but I'll be very surprised if this API is still a thing in 21XX
             startingTwoDigitsOfYear = "20"
-            dateTextFromArrPadded = startingTwoDigitsOfYear + _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(dateArr[1]) + "-" + _padIfNeeded(dateArr[0])
+            dateTextFromArrPadded = startingTwoDigitsOfYear + _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(
+                dateArr[1]) + "-" + _padIfNeeded(dateArr[0])
 
-            dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded,'%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
+            dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded, '%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
             dateFromHLTV = dateFromHLTV.astimezone(LOCAL_ZONEINFO)
 
             date = dateFromHLTV.strftime('%Y-%m-%d')
 
-            result_dict = {"match-id": match_id, "team1": t1, "team1-id": t1_id, "team2": t2, "team2-id": t2_id, "team1score": t1_score,
+            result_dict = {"match-id": match_id, "team1": t1, "team1-id": t1_id, "team2": t2, "team2-id": t2_id,
+                           "team1score": t1_score,
                            "team2score": t2_score, "date": date, "map": map, "event": event, "url": url}
 
             # Add this pages results to the result list
@@ -426,24 +537,28 @@ def get_results_by_date(start_date, end_date):
 
     return results_list
 
+
 def get_match_countdown(match_id):
     url = "https://www.hltv.org/matches/" + str(match_id) + "/page"
     match_page = get_parsed_page(url)
     timeAndEvent = match_page.find("div", {"class": "timeAndEvent"})
     date = timeAndEvent.find("div", {"class": "date"}).text
     time = timeAndEvent.find("div", {"class": "time"}).text
-    dateArr = date.replace("th of","").replace("rd of","").replace("st of","").replace("nd of","").split()
-    dateTextFromArrPadded = _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(_monthNameToNumber(dateArr[1])) + "-" + _padIfNeeded(dateArr[0])
+    dateArr = date.replace("th of", "").replace("rd of", "").replace("st of", "").replace("nd of", "").split()
+    dateTextFromArrPadded = _padIfNeeded(dateArr[2]) + "-" + _padIfNeeded(
+        _monthNameToNumber(dateArr[1])) + "-" + _padIfNeeded(dateArr[0])
 
-    dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded,'%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
+    dateFromHLTV = datetime.datetime.strptime(dateTextFromArrPadded, '%Y-%m-%d').replace(tzinfo=HLTV_ZONEINFO)
     dateFromHLTV = dateFromHLTV.astimezone(LOCAL_ZONEINFO)
 
     date = dateFromHLTV.strftime('%Y-%m-%d')
 
     return _generate_countdown(date, time)
 
+
 if __name__ == "__main__":
     import pprint
+
     pp = pprint.PrettyPrinter()
 
     pp.pprint('top5')
