@@ -6,9 +6,6 @@ from python_utils import converters
 import time
 import zoneinfo
 import tzlocal
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-import random
 from selenium import webdriver
 
 HLTV_COOKIE_TIMEZONE = "Europe/Copenhagen"
@@ -68,7 +65,7 @@ def get_parsed_page(url, delay=0.5):
     return BeautifulSoup(requests.get(url, headers=headers, cookies=cookies).text, "lxml")
 
 
-def get_parsed_page_sel(url, delay=0.5):
+def get_parsed_page_sel(url, delay=0.5, driver=None):
     # Настройка WebDriver (например, ChromeDriver)
     driver = webdriver.Chrome()  # Укажите путь к ChromeDriver
 
@@ -138,41 +135,56 @@ def top_players():
     return playersArray
 
 
-def top_players_full(from_file: bool = True):
+def top_players_full(start_date: datetime.date,
+                     end_date: datetime.date,
+                     ranking_filter: int = 0,
+                     from_file: bool = False):
     if from_file:
         with open('Counter-Strike Player statistics database _ HLTV.org.html', 'r') as f:
             text = f.read()
         page = BeautifulSoup(text, "html.parser")
     else:
-        page = get_parsed_page_sel("https://www.hltv.org/stats/players?startDate=2022-11-27&endDate=2023-11-27&minMapCount=20")
+        url = f"https://www.hltv.org/stats/players?startDate={start_date}&endDate={end_date}&minMapCount=1"
+        if ranking_filter != 0:
+            url += f"&rankingFilter=Top{ranking_filter}"
+        page = get_parsed_page_sel(url)
     # print(str(page)[:120000])
     playerCol = page.find_all("td", {"class": "playerCol"})
     teamCol = page.find_all("td", {"class": "teamCol"})
-    statsDetailMapsAndKD = page.find_all("td", {"class": "statsDetail"})
+    statsDetailMapsAndKD = page.find_all(lambda tag: tag.name == 'td' and tag.get('class') == ['statsDetail'])
+    statsDetailMaps = statsDetailMapsAndKD[::2]
+    statsDetailKD = statsDetailMapsAndKD[1::2]
     statsDetailRounds = page.find_all("td", {"class": "statsDetail gtSmartphone-only"})
     kdDiffCol = page.find_all("td", {"class": ["kdDiffCol won",
-                                               "kdDiffCol lost"]})
+                                               "kdDiffCol lost",
+                                               "kdDiffCol"]})
     ratingCol = page.find_all("td", {"class": ["ratingCol ratingPositive",
                                                "ratingCol ratingNeutral",
                                                "ratingCol ratingNegative"]})
 
+    total_len = len(playerCol)
+    if len(teamCol) != total_len or \
+            len(statsDetailMapsAndKD) != total_len * 2 or \
+            len(statsDetailRounds) != total_len or \
+            len(kdDiffCol) != total_len or \
+            len(ratingCol) != total_len:
+        print("Len differs", total_len, len(teamCol), len(statsDetailMapsAndKD),
+              len(statsDetailRounds), len(kdDiffCol), len(ratingCol))
+
     playersArray = []
     for i in range(len(playerCol)):
         player = playerCol[i]
+        url = player.find('a')['href']
 
-        #try:
-        playerObj = {'country': player.find_all('img')[0]['alt']}
-        #buildName = player.find('img', {'class': 'img'})['alt'].split("'")
-        #playerObj['name'] = player.find('a').text
-        playerObj['nickname'] = player.find('a').text.strip()
-        #playerObj['rating'] = player.find('div', {'class': 'rating'}).find('span', {'class': 'bold'}).text
-        #playerObj['maps-played'] = player.find('div', {'class': 'average gtSmartphone-only'}).find('span', {
-        #    'class': 'bold'}).text
-        playerObj['url'] = player.find('a')['href']
-        playerObj['id'] = playerObj['url'].split('/')[-2]
+        playerObj = {'country': player.find_all('img')[0]['alt'],
+                     'nickname': player.find('a').text.strip(),
+                     'rating': ratingCol[i].get_text(),
+                     'maps': statsDetailMaps[i].get_text(),
+                     'rounds': statsDetailRounds[i].get_text(),
+                     'k/d': statsDetailKD[i].get_text(),
+                     'id': url.split('/')[-2]
+                     }
         playersArray.append(playerObj)
-        #except Exception as e:
-        #    print(e)
     return playersArray
 
 
@@ -248,7 +260,7 @@ def _get_current_lineup(player_anchors):
         player = {}
         buildName = player_anchor.find("img", {"class": "container-width"})["alt"].split('\'')
         player['country'] = \
-        player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
+            player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
         player['name'] = buildName[0].rstrip() + buildName[2]
         player['nickname'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("div", {
             "class": "text-ellipsis"}).text
@@ -273,7 +285,7 @@ def _get_historical_lineup(player_anchors):
         player = {}
         buildName = player_anchor.find("img", {"class": "container-width"})["alt"].split('\'')
         player['country'] = \
-        player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
+            player_anchor.find("div", {"class": "teammate-info standard-box"}).find("img", {"class": "flag"})["alt"]
         player['name'] = buildName[0].rstrip() + buildName[2]
         player['nickname'] = player_anchor.find("div", {"class": "teammate-info standard-box"}).find("div", {
             "class": "text-ellipsis"}).text
