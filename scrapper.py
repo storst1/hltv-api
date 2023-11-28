@@ -7,10 +7,10 @@ from main import *
 conn = sqlite3.connect("db/data.db")
 
 
-def check_if_table_exists(table_name: str) -> bool:
+def check_if_table_exists(_table_name: str) -> bool:
     cursor = conn.cursor()
 
-    cursor.execute(f"SELECT count(name) FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+    cursor.execute(f"SELECT count(name) FROM sqlite_master WHERE type='table' AND name='{_table_name}'")
 
     # If the count is 1, then table exists
     if cursor.fetchone()[0] == 1:
@@ -18,6 +18,23 @@ def check_if_table_exists(table_name: str) -> bool:
 
     return False
 
+
+def drop_all_empty_tables():
+    cursor = conn.cursor()
+
+    cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table'")
+
+    all_tables_list = cursor.fetchall()
+    for table in all_tables_list:
+        _table_name = table[0]
+        cursor.execute(f"SELECT COUNT(*) FROM '{_table_name}'")
+        rows = cursor.fetchone()[0]
+        if rows < 1:
+            cursor.execute(f"DROP TABLE '{_table_name}'")
+            print(f"Dropped empty table {_table_name}")
+
+
+drop_all_empty_tables()
 
 start_date_year = 2015
 start_date_month = 10
